@@ -1,0 +1,14 @@
+# News Monitor - Python Dependencies
+# Minimal dependencies for lightweight deployment
+
+# Firecrawl for web scraping (1 credit per scrape)
+firecrawl-py>=1.0.0
+
+# OpenAI for AI summarization (GPT-4o-mini)
+openai>=1.0.0
+
+# HTTP requests for Telegram API
+requests>=2.28.0
+
+# Environment variable management
+python-dotenv>=1.0.0
