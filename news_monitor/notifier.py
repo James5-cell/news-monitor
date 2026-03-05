@@ -1,16 +1,20 @@
 """
-News Monitor v2.1 - Telegram Notifier Module
-Fixed: Auto-split long messages at 3500 chars for complete delivery.
+News Monitor v2.2 - Telegram Notifier Module
+- Segment at 2500-3000 chars for readability
+- Each segment has section title (no bare "2/3")
+- Split only at section boundaries (━━━━━━━━━━)
 """
 
 import os
+import re
 import requests
 from typing import Optional
 
 
 # Telegram message length limits
 MAX_MESSAGE_LENGTH = 4096
-SAFE_SPLIT_LENGTH = 3500  # Split before reaching limit
+# 單則控制在 2500-3000 字內，取中間值
+SAFE_SPLIT_LENGTH = 2800
 
 
 def get_telegram_config() -> tuple[str, str]:
@@ -76,53 +80,46 @@ def send_telegram_message(message: str, parse_mode: str = "Markdown") -> bool:
         return False
 
 
+# 與 summarizer 一致的分隔符，用於在邊界切段
+SECTION_SEP = "━━━━━━━━━━"
+
+
 def split_message_smart(message: str, max_length: int = SAFE_SPLIT_LENGTH) -> list[str]:
     """
-    Split a long message into chunks, preserving formatting.
-    
-    Splitting strategy:
-    1. Try to split at source section boundaries (📰, 📊, 🏛️, etc.)
-    2. Fall back to splitting at double newlines
-    3. Last resort: split at single newlines
-    
-    Args:
-        message: Full message text
-        max_length: Maximum characters per chunk
-        
-    Returns:
-        List of message chunks
+    在段落邊界切分長訊息，避免「2/3、3/3」孤立。
+    優先於 SECTION_SEP 切分，單段過長再以換行切。
     """
     if len(message) <= max_length:
         return [message]
-    
+
+    # 以「分隔符 + 換行」切區塊；第一塊為標題+宏觀+Top5，其後為分來源/明日
+    raw_blocks = message.split("\n" + SECTION_SEP + "\n")
+    blocks = [b.strip() for b in raw_blocks if b.strip()]
+
+    if len(blocks) <= 1 and len(message) > max_length:
+        blocks = [message]
+
     chunks = []
-    
-    # Try to split by source emoji markers
-    import re
-    source_pattern = r'\n(?=\*?[📰🏛️💹📊🔬])'
-    sections = re.split(source_pattern, message)
-    
-    current_chunk = ""
-    
-    for section in sections:
-        # If adding this section exceeds limit
-        if len(current_chunk) + len(section) > max_length:
-            if current_chunk:
-                chunks.append(current_chunk.strip())
-            
-            # If single section is too long, split it further
-            if len(section) > max_length:
-                sub_chunks = split_by_newlines(section, max_length)
-                chunks.extend(sub_chunks[:-1])
-                current_chunk = sub_chunks[-1] if sub_chunks else ""
-            else:
-                current_chunk = section
+    current = ""
+
+    for block in blocks:
+        need_new_chunk = len(current) + len(block) + 4 > max_length
+        if need_new_chunk and current.strip():
+            chunks.append(current.strip())
+            current = ""
+        if len(block) > max_length:
+            if current.strip():
+                chunks.append(current.strip())
+                current = ""
+            sub = split_by_newlines(block, max_length)
+            chunks.extend(sub[:-1])
+            current = sub[-1] if sub else ""
         else:
-            current_chunk += section
-    
-    if current_chunk.strip():
-        chunks.append(current_chunk.strip())
-    
+            current = (current + "\n\n" + SECTION_SEP + "\n\n" + block) if current else block
+
+    if current.strip():
+        chunks.append(current.strip())
+
     return chunks
 
 
@@ -147,40 +144,39 @@ def split_by_newlines(text: str, max_length: int) -> list[str]:
     return chunks
 
 
+def _segment_title(segment_index: int, total: int) -> str:
+    """多段時，第 2 段起加上段落標題，避免孤立「2/3」。"""
+    if total <= 1 or segment_index == 0:
+        return ""
+    labels = ["頭條與宏觀", "分來源摘要", "明日跟蹤"]
+    label = labels[min(segment_index, len(labels) - 1)]
+    if segment_index >= len(labels):
+        label = f"續（{segment_index + 1}/{total}）"
+    return f"📰 *全球財經日報* · {label}\n\n"
+
+
 def send_long_message(message: str) -> bool:
     """
-    Send a potentially long message by auto-splitting.
-    
-    v2.1: Automatically splits at 3500 chars to ensure all 
-    news items are delivered.
-    
-    Args:
-        message: Full message text (can exceed 4096 chars)
-        
-    Returns:
-        True if all chunks sent successfully
+    自動分段發送：單則 2500-3000 字，每段皆有段落標題。
     """
     chunks = split_message_smart(message, SAFE_SPLIT_LENGTH)
-    
+
     total_chunks = len(chunks)
     if total_chunks > 1:
-        print(f"  📨 Message split into {total_chunks} parts")
-    
+        print(f"  📨 Message split into {total_chunks} parts (max ~{SAFE_SPLIT_LENGTH} chars each)")
+
     success_count = 0
-    
     for i, chunk in enumerate(chunks):
-        # Add part indicator for multi-part messages
-        if total_chunks > 1:
-            part_indicator = f"[{i+1}/{total_chunks}]\n\n" if i > 0 else ""
-            chunk = part_indicator + chunk
-        
+        # 第 2 段起加段落標題，避免僅顯示「2/3」
+        if total_chunks > 1 and i > 0:
+            chunk = _segment_title(i, total_chunks) + chunk
+
         print(f"  → Sending part {i+1}/{total_chunks} ({len(chunk)} chars)...")
-        
         if send_telegram_message(chunk):
             success_count += 1
         else:
             print(f"  ⚠️ Failed to send part {i+1}")
-    
+
     return success_count == total_chunks
 
 

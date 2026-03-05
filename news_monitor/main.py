@@ -1,6 +1,6 @@
 """
-News Monitor v2.1 - Main Orchestrator
-Fixed: Link preservation, 40-50 news output, auto-split messaging.
+News Monitor v2.2 - Main Orchestrator
+v2.2: Structured macro insight, dedup, readable layout, segment titles.
 """
 
 import os
