@@ -2,7 +2,7 @@ name: Daily News Monitor
 
 on:
   # Run daily at UTC 00:00 (Taipei 08:00)
-  schedule:
+ # schedule:
     - cron: '0 0 * * *'
   
   # Allow manual trigger for testing
